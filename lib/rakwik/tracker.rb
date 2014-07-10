@@ -1,4 +1,5 @@
 require 'em-http'
+require 'digest/md5'
 
 module Rakwik
   class Tracker
@@ -23,6 +24,10 @@ module Rakwik
       env['rakwik.duration'] = (Time.now - start)*1000
       track Rack::Request.new(env) if track?
       [@status, @headers, @body]
+    end
+
+    def self.user_agent
+      "Rakwik Tracker #{Rakwik::VERSION}"
     end
 
     private
@@ -55,7 +60,7 @@ module Rakwik
 
     def extract(request)
       header = {
-        'User-Agent' => (request.user_agent || "Rakwik Tracker #{Rakwik::VERSION}")
+        'User-Agent' => (request.user_agent || self.class.user_agent)
       }
       header['Accept-Language'] = request.env['HTTP_ACCEPT_LANGUAGE'] unless request.env['HTTP_ACCEPT_LANGUAGE'].nil?
       header['DNT'] = request.env['HTTP_DNT'] unless request.env['HTTP_DNT'].nil?
@@ -77,14 +82,21 @@ module Rakwik
         'rand'       => rand(1000000),
         'apiv'       => 1,
         'gt_ms'      => request.env['rakwik.duration'],
-        'ua'         => request.user_agent
+        'ua'         => request.user_agent,
+        'lang'       => header['Accept-Language']
       }
       data['action_name'] = request.env['rakwik.action_name'] unless request.env['rakwik.action_name'].nil?
       data['urlref'] = request.referer unless request.referer.nil?
       data['gt_ms'] = request.env['rakwik.duration']
 
+      if w = request.env['warden']
+        data['_id'] = Digest::MD5.hexdigest w.user
+      end
+
       if not_found? && @options[:track_404] === true
-        data['action_name'] = "404/URL = #{data['url'].gsub(/\//, '%2f')}/From = #{data['urlref'].gsub(/\//, '%2f')}"
+        data['action_name'] = "404"
+        data['action_name'] += "/URL = #{data['url'].gsub(/\//, '%2f')}" if data['url']
+        data['action_name'] += "/From = #{data['urlref'].gsub(/\//, '%2f')}" if data['urlref']
       end
 
       [header, data]
